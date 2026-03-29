@@ -100,7 +100,7 @@ services:
     image: ghcr.io/eldahar/pm-ui:latest
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
