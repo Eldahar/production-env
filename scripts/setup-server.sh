@@ -4,6 +4,12 @@
 # VAGY: chmod +x setup-server.sh && ./setup-server.sh
 set -euo pipefail
 
+# Root check
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Ez a script root jogot igényel. Használd: sudo $0" >&2
+    exit 1
+fi
+
 echo "=== Server Setup ==="
 
 # 1. Csomagok
@@ -15,6 +21,12 @@ apt install -y docker.io docker-compose-v2 git ufw fail2ban unattended-upgrades
 echo "-- Configuring Docker --"
 systemctl enable docker
 systemctl start docker
+
+# Deploy user hozzáadása a docker csoporthoz (sudo nélkül is futhasson docker)
+if [ -n "${SUDO_USER:-}" ]; then
+    usermod -aG docker "$SUDO_USER"
+    echo "  User '$SUDO_USER' hozzáadva a docker csoporthoz (újra be kell lépni SSH-val)"
+fi
 
 # Docker log rotation
 cat > /etc/docker/daemon.json << 'DAEMON_JSON'
