@@ -61,11 +61,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     labels:
       - "traefik.enable=true"
       # API router — mindkét domain, /api prefix
@@ -100,10 +100,11 @@ services:
     image: ghcr.io/eldahar/pm-ui:latest
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:80/ || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://localhost/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 10s
     labels:
       - "traefik.enable=true"
       # UI router — mindkét domain, catch-all (alacsonyabb priority)
