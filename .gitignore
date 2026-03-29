@@ -1,0 +1,5 @@
+# Secrets
+.env.prod
+
+# Backup files (stored in Docker volume, not in repo)
+*.sql.gz

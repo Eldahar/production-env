@@ -1,0 +1,217 @@
+# ══════════════════════════════════════════════════════════
+# Production Docker Compose — Project Management
+# ══════════════════════════════════════════════════════════
+# Használat:
+#   docker compose pull
+#   docker compose up -d
+#
+# Előfeltétel: .env.prod fájl kitöltve (lásd .env.prod.example)
+#
+# Image-ek: ghcr.io/eldahar/pm-{api,ui,ai}
+# Build: dev gépen `make prod-push-all` (project-management/ repo)
+# ══════════════════════════════════════════════════════════
+
+services:
+  # ── Reverse Proxy + TLS ──
+  traefik:
+    image: traefik:v3
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # HTTP → HTTPS redirect
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Let's Encrypt
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@maturin.hu"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # Access log
+      - "--accesslog=true"
+      - "--accesslog.filepath=/dev/stdout"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "letsencrypt:/letsencrypt"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - frontend
+
+  # ── API (Symfony + nginx + PHP-FPM) ──
+  api:
+    image: ghcr.io/eldahar/pm-api:latest
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      APP_ENV: prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "traefik.enable=true"
+      # API router — mindkét domain, /api prefix
+      - "traefik.http.routers.api.rule=Host(`pm.maturin.hu`,`loginautonom.maturin.hu`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api.priority=2"
+      - "traefik.http.services.api.loadbalancer.server.port=8080"
+      # Security headers middleware
+      - "traefik.http.middlewares.security-headers.headers.stsSeconds=63072000"
+      - "traefik.http.middlewares.security-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.security-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.security-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.security-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.security-headers.headers.permissionsPolicy=camera=(), microphone=(), geolocation=()"
+      - "traefik.http.routers.api.middlewares=security-headers"
+    volumes:
+      - api_jwt:/var/www/html/config/jwt
+      - api_share:/var/www/html/var/share
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - frontend
+      - backend
+      - pm-ai-net
+
+  # ── UI (React static files via nginx) ──
+  ui:
+    image: ghcr.io/eldahar/pm-ui:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      # UI router — mindkét domain, catch-all (alacsonyabb priority)
+      - "traefik.http.routers.ui.rule=Host(`pm.maturin.hu`,`loginautonom.maturin.hu`)"
+      - "traefik.http.routers.ui.entrypoints=websecure"
+      - "traefik.http.routers.ui.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.ui.priority=1"
+      - "traefik.http.services.ui.loadbalancer.server.port=80"
+      - "traefik.http.routers.ui.middlewares=security-headers"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - frontend
+
+  # ── Worker (Symfony Messenger consumer) ──
+  worker:
+    image: ghcr.io/eldahar/pm-api:latest
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      APP_ENV: prod
+    command: ["php", "bin/console", "messenger:consume", "async", "--time-limit=3600", "--memory-limit=256M"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+      - pm-ai-net
+
+  # ── AI Service (Python FastAPI) ──
+  ai:
+    image: ghcr.io/eldahar/pm-ai:latest
+    restart: unless-stopped
+    env_file: .env.prod
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      pm-ai-net:
+        aliases:
+          # Tenant-specifikus alias-ok — a valódi UUID-kre cserélendő
+          # a tenant létrehozás után. Formátum: pm-ai-{tenantUuid}
+          - pm-ai-01999000-1000-7000-8000-e2e000000001
+
+  # ── PostgreSQL ──
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_DB: pm_central
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d pm_central"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  # ── Backup (pg_dump cron) ──
+  backup:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file: .env.prod
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ./scripts/backup-entrypoint.sh:/entrypoint.sh:ro
+      - backups:/backups
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  letsencrypt:
+  api_jwt:
+  api_share:
+  backups:
+
+networks:
+  frontend:
+  backend:
+  pm-ai-net:
+    driver: bridge
