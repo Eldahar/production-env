@@ -19,6 +19,7 @@ services:
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=production-env_frontend"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       # HTTP → HTTPS redirect
