@@ -23,7 +23,8 @@ echo "  OK pm_tenant_default"
 # 2. Central DB migráció
 echo ""
 echo "-- Running central DB migrations --"
-docker compose exec -T api php bin/console doctrine:migrations:migrate --em=central --no-interaction
+docker compose exec -T api php bin/console doctrine:migrations:migrate \
+    --em=central --configuration=config/migrations/central.yaml --no-interaction
 
 # 3. Tenant schema migráció (a default DB-re — ugyanez a schema megy minden tenant-re)
 echo ""

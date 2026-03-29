@@ -62,5 +62,5 @@ console:
 	docker compose exec api php bin/console $(CMD)
 
 migrate:
-	docker compose exec api php bin/console doctrine:migrations:migrate --em=central --no-interaction
+	docker compose exec api php bin/console doctrine:migrations:migrate --em=central --configuration=config/migrations/central.yaml --no-interaction
 	docker compose exec api php bin/console doctrine:migrations:migrate --em=tenant --no-interaction

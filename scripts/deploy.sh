@@ -27,9 +27,12 @@ echo ""
 
 # 3. Migráció
 if [ "$SKIP_MIGRATE" = false ]; then
-    echo "-- Running migrations --"
+    echo "-- Running migrations (central) --"
     docker compose exec -T api \
-        php bin/console doctrine:migrations:migrate --no-interaction
+        php bin/console doctrine:migrations:migrate --em=central --configuration=config/migrations/central.yaml --no-interaction
+    echo "-- Running migrations (tenant) --"
+    docker compose exec -T api \
+        php bin/console doctrine:migrations:migrate --em=tenant --no-interaction
     echo ""
 fi
 
