@@ -29,12 +29,16 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=admin@maturin.hu"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      # Access log
+      # Logging
+      - "--log.level=DEBUG"
       - "--accesslog=true"
       - "--accesslog.filepath=/dev/stdout"
+      # API (debug — disable after setup)
+      - "--api.insecure=true"
     ports:
       - "80:80"
       - "443:443"
+      - "127.0.0.1:8080:8080"  # Traefik API (debug — only localhost)
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "letsencrypt:/letsencrypt"
