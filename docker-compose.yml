@@ -125,25 +125,19 @@ services:
     networks:
       - frontend
 
-  # ── Worker (Symfony Messenger consumer) ──
-  worker:
-    image: ghcr.io/eldahar/pm-api:latest
-    restart: unless-stopped
-    env_file: .env.prod
-    environment:
-      APP_ENV: prod
-    command: ["php", "bin/console", "messenger:consume", "outbox", "--time-limit=3600", "--memory-limit=256M"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - backend
-      - pm-ai-net
+  # ── Tenant Workers ──
+  # Per-tenant worker konténereket a tenant-worker-reconciler.sh kezeli.
+  # A reconciler 30 másodpercenként ellenőrzi a central DB-t és
+  # indítja/leállítja a worker-eket szükség szerint.
+  #
+  # Telepítés:
+  #   sudo cp scripts/tenant-worker-reconciler.service /etc/systemd/system/
+  #   sudo cp scripts/tenant-worker-reconciler.timer /etc/systemd/system/
+  #   sudo systemctl daemon-reload
+  #   sudo systemctl enable --now tenant-worker-reconciler.timer
+  #
+  # Manuális futtatás:
+  #   ./scripts/tenant-worker-reconciler.sh
 
   # ── AI Service (Python FastAPI) ──
   ai:
