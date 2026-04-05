@@ -45,8 +45,6 @@ ENCRYPTION_KEY=$(grep '^ENCRYPTION_KEY=' "$ENV_FILE" | cut -d= -f2-)
 MAILER_DSN=$(grep '^MAILER_DSN=' "$ENV_FILE" | cut -d= -f2-)
 MESSENGER_TRANSPORT_DSN=$(grep '^MESSENGER_TRANSPORT_DSN=' "$ENV_FILE" | cut -d= -f2-)
 INTERNAL_API_BASE_URL=$(grep '^INTERNAL_API_BASE_URL=' "$ENV_FILE" | cut -d= -f2-)
-INTERNAL_API_TOKEN=$(grep '^INTERNAL_API_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-
 if [[ -z "$POSTGRES_PASSWORD" || -z "$DATABASE_URL" ]]; then
     log "ERROR: POSTGRES_PASSWORD or DATABASE_URL not found in ${ENV_FILE}"
     exit 1
@@ -83,6 +81,17 @@ done <<< "$RUNNING_RAW"
 
 log "Running workers: ${#RUNNING_WORKERS[@]} (${!RUNNING_WORKERS[*]})"
 
+# ── OAuth2 credentials lekérdezés ──
+get_oauth2_credentials() {
+    local subdomain="$1"
+    local client_id="worker-${subdomain}"
+
+    docker exec "${COMPOSE_PROJECT}-postgres-1" \
+        psql -U app -d pm_central -t -A -F'|' \
+        -c "SELECT identifier, secret FROM oauth2_client WHERE identifier = '${client_id}' AND active = true LIMIT 1;" \
+        2>/dev/null
+}
+
 # ── 3. Hiányzó worker-ek indítása ──
 STARTED=0
 for subdomain in "${!EXPECTED_WORKERS[@]}"; do
@@ -92,6 +101,14 @@ for subdomain in "${!EXPECTED_WORKERS[@]}"; do
         tenant_db_url="postgresql://app:${POSTGRES_PASSWORD}@postgres:5432/${db_name}?serverVersion=18&charset=utf8"
 
         log "Starting worker for tenant '${subdomain}' (DB: ${db_name})..."
+
+        OAUTH2_CREDS=$(get_oauth2_credentials "$subdomain")
+        if [[ -z "$OAUTH2_CREDS" ]]; then
+            log "  ⚠ No OAuth2 client found for tenant '${subdomain}' — skipping"
+            continue
+        fi
+        OAUTH2_CLIENT_ID=$(echo "$OAUTH2_CREDS" | cut -d'|' -f1)
+        OAUTH2_CLIENT_SECRET=$(echo "$OAUTH2_CREDS" | cut -d'|' -f2)
 
         # Network connect parancsok összeállítása
         NETWORK_ARGS=()
@@ -107,14 +124,17 @@ for subdomain in "${!EXPECTED_WORKERS[@]}"; do
             "${NETWORK_ARGS[@]}" \
             -e APP_ENV=prod \
             -e APP_SECRET="$APP_SECRET" \
-            -e DATABASE_URL="$DATABASE_URL" \
+            -e DATABASE_URL="postgresql://no_access:no_access@central-db-disabled:5432/no_central" \
             -e TENANT_DATABASE_URL="$tenant_db_url" \
-            -e MESSENGER_TRANSPORT_DSN="$MESSENGER_TRANSPORT_DSN" \
+            -e FAILED_TRANSPORT_DSN="http-failed://central" \
             -e MAILER_DSN="$MAILER_DSN" \
             -e JWT_PASSPHRASE="$JWT_PASSPHRASE" \
             -e ENCRYPTION_KEY="$ENCRYPTION_KEY" \
             -e INTERNAL_API_BASE_URL="$INTERNAL_API_BASE_URL" \
-            -e INTERNAL_API_TOKEN="$INTERNAL_API_TOKEN" \
+            -e OAUTH2_TOKEN_ENDPOINT="${INTERNAL_API_BASE_URL}/oauth2/token" \
+            -e OAUTH2_CLIENT_ID="$OAUTH2_CLIENT_ID" \
+            -e OAUTH2_CLIENT_SECRET="$OAUTH2_CLIENT_SECRET" \
+            -e OAUTH2_SCOPE="internal:relay" \
             --log-driver json-file \
             --log-opt max-size=5m \
             --log-opt max-file=3 \
