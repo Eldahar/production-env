@@ -139,7 +139,7 @@ services:
   # Manuális futtatás:
   #   ./scripts/tenant-worker-reconciler.sh
 
-  # ── AI Service (Python FastAPI) ──
+  # ── AI Service Bridge (Node.js + Claude Code CLI) ──
   ai:
     image: ghcr.io/eldahar/pm-ai:latest
     restart: unless-stopped

@@ -30,9 +30,9 @@ if [ "$SKIP_MIGRATE" = false ]; then
     echo "-- Running migrations (central) --"
     docker compose exec -T api \
         php bin/console doctrine:migrations:migrate --em=central --configuration=config/migrations/central.yaml --no-interaction
-    echo "-- Running migrations (tenant) --"
+    echo "-- Running migrations (all tenants) --"
     docker compose exec -T api \
-        php bin/console doctrine:migrations:migrate --em=tenant --no-interaction
+        php bin/console app:tenant:migrate
     echo ""
 fi
 
